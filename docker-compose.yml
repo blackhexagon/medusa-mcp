@@ -1,0 +1,35 @@
+# Medusa MCP server - one instance per client/store.
+#
+# Dokploy: create a "Compose" service, paste this file, fill the variables in the
+# "Environment" tab (see .env.example) and add a domain in the "Domains" tab
+# pointing to service "medusa-mcp", port 3000. The MCP endpoint is https://<domain>/mcp
+services:
+  medusa-mcp:
+    image: ${MEDUSA_MCP_IMAGE:-ghcr.io/blackhexagon/medusa-mcp:latest}
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      # --- Medusa backend (required) ---
+      MEDUSA_BASE_URL: ${MEDUSA_BASE_URL:?MEDUSA_BASE_URL is required}
+      # Secret API key (Medusa Admin > Settings > Secret API Keys) - recommended
+      MEDUSA_API_KEY: ${MEDUSA_API_KEY:-}
+      # ...or an admin user instead of the API key
+      MEDUSA_ADMIN_EMAIL: ${MEDUSA_ADMIN_EMAIL:-}
+      MEDUSA_ADMIN_PASSWORD: ${MEDUSA_ADMIN_PASSWORD:-}
+
+      # --- MCP endpoint auth (required) ---
+      # Comma-separated bearer tokens; generate with `openssl rand -hex 32`
+      MCP_AUTH_TOKENS: ${MCP_AUTH_TOKENS:?MCP_AUTH_TOKENS is required}
+      MCP_ALLOW_QUERY_TOKEN: ${MCP_ALLOW_QUERY_TOKEN:-false}
+
+      # --- Behaviour (optional) ---
+      MCP_TOOL_MODE: ${MCP_TOOL_MODE:-dynamic}
+      MEDUSA_READ_ONLY: ${MEDUSA_READ_ONLY:-false}
+      MEDUSA_INCLUDE_TAGS: ${MEDUSA_INCLUDE_TAGS:-}
+      MEDUSA_EXCLUDE_TAGS: ${MEDUSA_EXCLUDE_TAGS:-}
+      MEDUSA_EXCLUDE_OPERATIONS: ${MEDUSA_EXCLUDE_OPERATIONS:-}
+      MEDUSA_ALLOW_RAW_REQUESTS: ${MEDUSA_ALLOW_RAW_REQUESTS:-true}
+      MCP_MAX_RESPONSE_CHARS: ${MCP_MAX_RESPONSE_CHARS:-60000}
+      MCP_SERVER_NAME: ${MCP_SERVER_NAME:-medusa-admin}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
