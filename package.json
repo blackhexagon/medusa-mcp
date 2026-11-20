@@ -1,6 +1,6 @@
 {
   "name": "medusa-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "MCP server for the Medusa v2 Admin API (Streamable HTTP + stdio), generated from the Medusa OpenAPI spec.",
   "type": "module",
   "main": "dist/index.js",

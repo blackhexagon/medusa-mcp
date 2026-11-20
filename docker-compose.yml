@@ -6,6 +6,8 @@
 services:
   medusa-mcp:
     image: ${MEDUSA_MCP_IMAGE:-ghcr.io/blackhexagon/medusa-mcp:latest}
+    # Always pull on deploy, otherwise a moving tag like "latest" is never updated.
+    pull_policy: always
     restart: unless-stopped
     expose:
       - "3000"

@@ -10,9 +10,9 @@ COPY src ./src
 RUN npm run build && npm prune --omit=dev
 
 FROM node:24-alpine
-ARG APP_VERSION=dev
+ARG GIT_SHA=""
 ENV NODE_ENV=production \
-    APP_VERSION=${APP_VERSION} \
+    GIT_SHA=${GIT_SHA} \
     MCP_TRANSPORT=http \
     HOST=0.0.0.0 \
     PORT=3000

@@ -5,7 +5,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { Config } from "./config.js";
 import { log } from "./log.js";
 import type { OAuthProvider } from "./oauth/provider.js";
-import { VERSION } from "./version.js";
+import { COMMIT, VERSION, VERSION_LABEL } from "./version.js";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest();
 
@@ -107,14 +107,14 @@ export function startHttpServer(config: Config, createMcp: (caller: Caller) => M
       }
 
       if (url.pathname === "/health" || url.pathname === "/healthz") {
-        sendJson(res, 200, { status: "ok", version: VERSION });
+        sendJson(res, 200, { status: "ok", version: VERSION, commit: COMMIT, oauth: Boolean(oauth) });
         return;
       }
 
       const path = url.pathname.replace(/\/+$/, "") || "/";
       if (path !== config.mcpPath) {
         if (path === "/" && req.method === "GET") {
-          sendJson(res, 200, { name: "medusa-mcp", version: VERSION, mcp_endpoint: config.mcpPath });
+          sendJson(res, 200, { name: "medusa-mcp", version: VERSION, commit: COMMIT, mcp_endpoint: config.mcpPath });
           return;
         }
         sendJson(res, 404, { error: "Not found" });
@@ -156,7 +156,7 @@ export function startHttpServer(config: Config, createMcp: (caller: Caller) => M
   });
 
   httpServer.listen(config.port, config.host, () => {
-    log.info(`medusa-mcp ${VERSION} listening on http://${config.host}:${config.port}${config.mcpPath}`);
+    log.info(`medusa-mcp ${VERSION_LABEL} listening on http://${config.host}:${config.port}${config.mcpPath}`);
     if (oauth) log.info(`OAuth enabled: issuer ${oauth.issuer}, resource ${oauth.resource}`);
     if (tokenHashes.length === 0 && !oauth) log.warn("MCP endpoint is UNAUTHENTICATED (MCP_ALLOW_UNAUTHENTICATED=true)");
   });
