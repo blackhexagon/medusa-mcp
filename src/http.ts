@@ -4,6 +4,7 @@ import type { Server as McpServer } from "@modelcontextprotocol/sdk/server/index
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Config } from "./config.js";
 import { log } from "./log.js";
+import type { OAuthProvider } from "./oauth/provider.js";
 import { VERSION } from "./version.js";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest();
@@ -44,22 +45,35 @@ async function readBody(req: IncomingMessage, limit: number): Promise<unknown> {
   }
 }
 
-export function startHttpServer(config: Config, createMcp: () => McpServer) {
+/** Who is calling: a static token, an OAuth user, or nobody (unauthenticated mode). */
+export type Caller = { kind: "token" } | { kind: "oauth"; email: string; sub: string } | { kind: "anonymous" };
+
+export function startHttpServer(config: Config, createMcp: (caller: Caller) => McpServer, oauth?: OAuthProvider) {
   const tokenHashes = config.authTokens.map(sha256);
 
-  const isAuthorized = (req: IncomingMessage, url: URL): boolean => {
-    if (tokenHashes.length === 0) return config.allowUnauthenticated;
+  /** Returns the caller, or `undefined` if unauthorized; `presented` tells whether a credential was sent. */
+  const authenticate = (req: IncomingMessage, url: URL): { caller?: Caller; presented: boolean } => {
     let token: string | undefined;
     const header = req.headers.authorization;
     if (header?.toLowerCase().startsWith("bearer ")) token = header.slice(7).trim();
     if (!token && typeof req.headers["x-api-key"] === "string") token = req.headers["x-api-key"].trim();
     if (!token && config.allowQueryToken) token = url.searchParams.get("token") ?? undefined;
-    if (!token) return false;
-    const candidate = sha256(token);
-    // Check every token (no early exit) to keep timing independent of which token matched.
-    let ok = false;
-    for (const hash of tokenHashes) ok = timingSafeEqual(candidate, hash) || ok;
-    return ok;
+    if (!token) {
+      const open = tokenHashes.length === 0 && !oauth && config.allowUnauthenticated;
+      return { caller: open ? { kind: "anonymous" } : undefined, presented: false };
+    }
+    if (tokenHashes.length) {
+      const candidate = sha256(token);
+      // Check every token (no early exit) to keep timing independent of which token matched.
+      let ok = false;
+      for (const hash of tokenHashes) ok = timingSafeEqual(candidate, hash) || ok;
+      if (ok) return { caller: { kind: "token" }, presented: true };
+    }
+    if (oauth) {
+      const identity = oauth.verifyAccessToken(token);
+      if (identity) return { caller: { kind: "oauth", email: identity.email, sub: identity.sub }, presented: true };
+    }
+    return { presented: true };
   };
 
   const corsHeaders = (req: IncomingMessage): Record<string, string> => {
@@ -84,6 +98,9 @@ export function startHttpServer(config: Config, createMcp: () => McpServer) {
     for (const [k, v] of Object.entries(cors)) res.setHeader(k, v);
 
     try {
+      // OAuth / well-known routes handle their own CORS (public metadata + token endpoint).
+      if (oauth && (await oauth.handle(req, res, url))) return;
+
       if (req.method === "OPTIONS") {
         res.writeHead(204).end();
         return;
@@ -104,10 +121,11 @@ export function startHttpServer(config: Config, createMcp: () => McpServer) {
         return;
       }
 
-      if (!isAuthorized(req, url)) {
-        log.warn(`Unauthorized request from ${req.socket.remoteAddress}`);
+      const { caller, presented } = authenticate(req, url);
+      if (!caller) {
+        if (presented) log.warn(`Rejected invalid token from ${req.socket.remoteAddress}`);
         jsonRpcError(res, 401, "Unauthorized: missing or invalid bearer token", {
-          "www-authenticate": 'Bearer realm="medusa-mcp"',
+          "www-authenticate": oauth ? oauth.challenge(presented ? "invalid_token" : undefined) : 'Bearer realm="medusa-mcp"',
         });
         return;
       }
@@ -119,7 +137,7 @@ export function startHttpServer(config: Config, createMcp: () => McpServer) {
       }
 
       const body = await readBody(req, config.maxBodyBytes);
-      const mcp = createMcp();
+      const mcp = createMcp(caller);
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
       res.on("close", () => {
         void transport.close();
@@ -139,7 +157,8 @@ export function startHttpServer(config: Config, createMcp: () => McpServer) {
 
   httpServer.listen(config.port, config.host, () => {
     log.info(`medusa-mcp ${VERSION} listening on http://${config.host}:${config.port}${config.mcpPath}`);
-    if (tokenHashes.length === 0) log.warn("MCP endpoint is UNAUTHENTICATED (MCP_ALLOW_UNAUTHENTICATED=true)");
+    if (oauth) log.info(`OAuth enabled: issuer ${oauth.issuer}, resource ${oauth.resource}`);
+    if (tokenHashes.length === 0 && !oauth) log.warn("MCP endpoint is UNAUTHENTICATED (MCP_ALLOW_UNAUTHENTICATED=true)");
   });
 
   const shutdown = (signal: string) => {

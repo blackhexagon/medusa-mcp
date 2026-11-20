@@ -1,6 +1,16 @@
 export type ToolMode = "dynamic" | "full";
 export type Transport = "http" | "stdio";
 
+export interface OAuthConfig {
+  secret: string;
+  /** Public origin of this server, e.g. https://mcp.example.com (used as OAuth issuer). */
+  publicUrl: string;
+  accessTokenTtl: number;
+  refreshTokenTtl: number;
+  /** Allowed admin emails or "@domain" suffixes. Empty => every Medusa admin user. */
+  allowedEmails: string[];
+}
+
 export interface Config {
   transport: Transport;
   host: string;
@@ -12,6 +22,9 @@ export interface Config {
   allowQueryToken: boolean;
   corsOrigins: string[];
   maxBodyBytes: number;
+
+  /** OAuth 2.1 authorization server (login with a Medusa admin account). Enabled when `oauth` is set. */
+  oauth?: OAuthConfig;
 
   medusaBaseUrl: string;
   medusaApiKey?: string;
@@ -87,9 +100,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
   const authTokens = list(env.MCP_AUTH_TOKENS ?? env.MCP_AUTH_TOKEN);
   const allowUnauthenticated = bool(env.MCP_ALLOW_UNAUTHENTICATED, false);
-  if (transport === "http" && authTokens.length === 0 && !allowUnauthenticated) {
+  const oauth = loadOAuthConfig(env);
+  if (transport === "http" && authTokens.length === 0 && !oauth && !allowUnauthenticated) {
     throw new Error(
-      "MCP_AUTH_TOKEN(S) is required for the HTTP transport. Generate one with `openssl rand -hex 32`. " +
+      "The HTTP transport needs authentication: set MCP_AUTH_TOKENS (generate with `openssl rand -hex 32`) " +
+        "and/or enable OAuth with MCP_OAUTH_SECRET + MCP_PUBLIC_URL. " +
         "(Set MCP_ALLOW_UNAUTHENTICATED=true only for local testing.)",
     );
   }
@@ -110,6 +125,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     allowQueryToken: bool(env.MCP_ALLOW_QUERY_TOKEN, false),
     corsOrigins: list(env.MCP_CORS_ORIGINS),
     maxBodyBytes: int(env.MCP_MAX_BODY_BYTES, 20 * 1024 * 1024, "MCP_MAX_BODY_BYTES"),
+    oauth,
 
     medusaBaseUrl,
     medusaApiKey,
@@ -127,5 +143,31 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxResponseChars: int(env.MCP_MAX_RESPONSE_CHARS, 60_000, "MCP_MAX_RESPONSE_CHARS"),
     openapiPath: env.MEDUSA_OPENAPI_PATH || undefined,
     serverName: env.MCP_SERVER_NAME || "medusa-admin",
+  };
+}
+
+function loadOAuthConfig(env: NodeJS.ProcessEnv): OAuthConfig | undefined {
+  const secret = env.MCP_OAUTH_SECRET;
+  if (!secret) return undefined;
+  if (secret.length < 32) throw new Error("MCP_OAUTH_SECRET must be at least 32 characters (use `openssl rand -hex 32`).");
+  const raw = env.MCP_PUBLIC_URL;
+  if (!raw) throw new Error("MCP_PUBLIC_URL is required when OAuth is enabled (e.g. https://mcp.example.com).");
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`MCP_PUBLIC_URL is not a valid URL: ${raw}`);
+  }
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (url.protocol !== "https:" && !loopback) throw new Error("MCP_PUBLIC_URL must use https.");
+  if (url.pathname !== "/" || url.search || url.hash) {
+    throw new Error("MCP_PUBLIC_URL must be an origin without a path, e.g. https://mcp.example.com");
+  }
+  return {
+    secret,
+    publicUrl: url.origin,
+    accessTokenTtl: int(env.MCP_OAUTH_ACCESS_TOKEN_TTL, 3600, "MCP_OAUTH_ACCESS_TOKEN_TTL"),
+    refreshTokenTtl: int(env.MCP_OAUTH_REFRESH_TOKEN_TTL, 30 * 24 * 3600, "MCP_OAUTH_REFRESH_TOKEN_TTL"),
+    allowedEmails: list(env.MCP_OAUTH_ALLOWED_EMAILS).map((e) => e.toLowerCase()),
   };
 }

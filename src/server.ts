@@ -6,6 +6,7 @@ import {
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Config } from "./config.js";
+import type { Caller } from "./http.js";
 import { log } from "./log.js";
 import { ToolInputError, textResult } from "./tools/execute.js";
 import type { ToolDefinition } from "./tools/index.js";
@@ -28,7 +29,13 @@ function instructions(config: Config, operationCount: number): string {
   return lines.join("\n");
 }
 
-export function createMcpServer(config: Config, tools: ToolDefinition[], operationCount: number): Server {
+export function createMcpServer(
+  config: Config,
+  tools: ToolDefinition[],
+  operationCount: number,
+  caller: Caller = { kind: "anonymous" },
+): Server {
+  const who = caller.kind === "oauth" ? caller.email : caller.kind;
   const server = new Server(
     { name: config.serverName, title: "Medusa Admin", version: VERSION },
     { capabilities: { tools: {} }, instructions: instructions(config, operationCount) },
@@ -43,11 +50,11 @@ export function createMcpServer(config: Config, tools: ToolDefinition[], operati
     const started = Date.now();
     try {
       const result = await def.handler((request.params.arguments ?? {}) as Record<string, unknown>, extra.signal);
-      log.info(`tool ${request.params.name} ${result.isError ? "error" : "ok"} ${Date.now() - started}ms`);
+      log.info(`tool ${request.params.name} ${result.isError ? "error" : "ok"} ${Date.now() - started}ms (${who})`);
       return result;
     } catch (err) {
       if (err instanceof ToolInputError) return textResult(err.message, true);
-      log.error(`tool ${request.params.name} failed`, err);
+      log.error(`tool ${request.params.name} failed (${who})`, err);
       return textResult(`Internal error: ${err instanceof Error ? err.message : String(err)}`, true);
     }
   });

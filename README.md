@@ -4,7 +4,7 @@ An [MCP](https://modelcontextprotocol.io) server for the **Medusa v2 Admin API**
 
 - **Full API coverage**: the tools are generated from the OpenAPI spec. Admin routes added later or custom `/admin/*` routes work through raw requests.
 - **LLM-friendly**: by default the server exposes only 5 tools (search → describe → call), not 400+. These definitions take about 4 KB of context. The full set would take about 600 KB.
-- **Auth on both sides**: bearer tokens protect the MCP endpoint. The server reaches Medusa with a secret API key or an admin email and password.
+- **Auth on both sides**: the MCP endpoint accepts static bearer tokens and/or **OAuth 2.1**, where users sign in with their Medusa admin account. OAuth is needed for ChatGPT and lets Claude use "Sign in". The server reaches Medusa with a secret API key or an admin email and password.
 - **Safety switches**: read-only mode, tag allow-lists and deny-lists, and per-operation deny-lists.
 
 ## Tools
@@ -25,7 +25,11 @@ An [MCP](https://modelcontextprotocol.io) server for the **Medusa v2 Admin API**
 | `MEDUSA_ADMIN_EMAIL` / `MEDUSA_ADMIN_PASSWORD` | – | Used instead of the API key. The server gets a JWT and logs in again when it expires. |
 | `MEDUSA_EXTRA_HEADERS` | – | JSON object of extra headers for Medusa requests |
 | `MEDUSA_TIMEOUT_MS` | `30000` | Timeout for Medusa requests |
-| `MCP_AUTH_TOKENS` | – (required for HTTP) | Comma-separated bearer tokens. Use several to rotate tokens or to give each user their own. |
+| `MCP_AUTH_TOKENS` | – | Comma-separated static bearer tokens. Use several to rotate tokens or to give each user their own. HTTP mode needs these tokens, OAuth, or both. |
+| `MCP_OAUTH_SECRET` | – | Turns on OAuth (≥ 32 chars, `openssl rand -hex 32`). Tokens are signed with it, so changing it signs everyone out. |
+| `MCP_PUBLIC_URL` | – | Public origin of this server, e.g. `https://mcp.shop.com`. Required with OAuth; it is used as the issuer. |
+| `MCP_OAUTH_ALLOWED_EMAILS` | – | Optional allow-list of admin emails or `@domain` suffixes. If empty, every Medusa admin user can sign in. |
+| `MCP_OAUTH_ACCESS_TOKEN_TTL` / `MCP_OAUTH_REFRESH_TOKEN_TTL` | `3600` / `2592000` | Token lifetimes in seconds |
 | `MCP_ALLOW_QUERY_TOKEN` | `false` | Also accept `?token=…` in the URL, for clients that cannot set headers |
 | `MCP_ALLOW_UNAUTHENTICATED` | `false` | Local testing only |
 | `MCP_TOOL_MODE` | `dynamic` | `dynamic` or `full` |
@@ -47,11 +51,27 @@ An [MCP](https://modelcontextprotocol.io) server for the **Medusa v2 Admin API**
 ## Deploying on Dokploy (one instance per client)
 
 1. In the project, create **Compose** → Raw, then paste [`docker-compose.yml`](docker-compose.yml).
-2. In **Environment**, fill in the variables from [`.env.example`](.env.example): `MEDUSA_BASE_URL`, `MEDUSA_API_KEY`, and `MCP_AUTH_TOKENS` (generate with `openssl rand -hex 32`).
+2. In **Environment**, fill in the variables from [`.env.example`](.env.example): `MEDUSA_BASE_URL`, `MEDUSA_API_KEY`, and `MCP_AUTH_TOKENS` and/or `MCP_OAUTH_SECRET` + `MCP_PUBLIC_URL` (generate secrets with `openssl rand -hex 32`).
 3. In **Domains**, add a domain for the `medusa-mcp` service on port `3000` with HTTPS.
 4. Deploy. The endpoint is `https://<domain>/mcp`.
 
 For another client, create another Compose service with different env values.
+
+## OAuth (ChatGPT, Claude "Sign in")
+
+Set `MCP_OAUTH_SECRET` and `MCP_PUBLIC_URL` to enable OAuth. The server then acts as its own OAuth 2.1 authorization server, following the MCP authorization spec:
+
+- Discovery: `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-authorization-server`. A `401` response includes a `WWW-Authenticate` header with `resource_metadata`.
+- Authorization code + PKCE (S256), RFC 9207 `iss` in the redirect, and RFC 8707 `resource` / audience checks
+- Client registration: Client ID Metadata Documents (CIMD) and Dynamic Client Registration (`/oauth/register`)
+- `/oauth/authorize` shows a login page. The user signs in with their **Medusa admin email and password**, including MFA if it is enabled. The credentials are checked against Medusa and are never stored.
+- Tokens are stateless signed JWTs, so there is no database and they survive restarts. A refresh fails once the admin user is deleted in Medusa.
+
+API calls to Medusa still use `MEDUSA_API_KEY`. The OAuth login only decides *who may use* the MCP server, and the logs record which admin called each tool.
+
+**ChatGPT:** Settings → Plugins (or Apps) → *Add custom MCP server* → URL `https://mcp.shop.com/mcp`, Authentication **OAuth**. Leave the client ID and secret empty; ChatGPT registers itself through CIMD or DCR.
+
+**Claude (claude.ai / Desktop):** *Add custom connector* → URL `https://mcp.shop.com/mcp` → **Sign in now** → *Use Claude's published identity* (CIMD) or *Register automatically* (DCR).
 
 ## Connecting an MCP client
 

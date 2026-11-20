@@ -18,10 +18,16 @@ services:
       MEDUSA_ADMIN_EMAIL: ${MEDUSA_ADMIN_EMAIL:-}
       MEDUSA_ADMIN_PASSWORD: ${MEDUSA_ADMIN_PASSWORD:-}
 
-      # --- MCP endpoint auth (required) ---
+      # --- MCP endpoint auth (static tokens and/or OAuth; at least one is required) ---
       # Comma-separated bearer tokens; generate with `openssl rand -hex 32`
-      MCP_AUTH_TOKENS: ${MCP_AUTH_TOKENS:?MCP_AUTH_TOKENS is required}
+      MCP_AUTH_TOKENS: ${MCP_AUTH_TOKENS:-}
       MCP_ALLOW_QUERY_TOKEN: ${MCP_ALLOW_QUERY_TOKEN:-false}
+      # OAuth (ChatGPT, Claude "Sign in"): users log in with their Medusa admin account
+      MCP_OAUTH_SECRET: ${MCP_OAUTH_SECRET:-}
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-}
+      MCP_OAUTH_ALLOWED_EMAILS: ${MCP_OAUTH_ALLOWED_EMAILS:-}
+      MCP_OAUTH_ACCESS_TOKEN_TTL: ${MCP_OAUTH_ACCESS_TOKEN_TTL:-3600}
+      MCP_OAUTH_REFRESH_TOKEN_TTL: ${MCP_OAUTH_REFRESH_TOKEN_TTL:-2592000}
 
       # --- Behaviour (optional) ---
       MCP_TOOL_MODE: ${MCP_TOOL_MODE:-dynamic}
